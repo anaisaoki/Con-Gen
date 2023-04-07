@@ -1,0 +1,226 @@
+---
+title: "Predictive modeling of threat level in animals (Phylum chordata)"
+output: html_document
+date: '2023-04-03'
+---
+
+```{r setup, include=FALSE}
+#Load libraries
+library(randomForest)
+library(readxl)
+library(datasets)
+library(caret)
+library(ggplot2)
+library(cowplot) #improves some ggplot settings
+
+#Upload data
+animals <- read_excel("~/Desktop/Thesis/combined_chordata_msat.xlsx") 
+
+
+#to do
+##FIX VARIABLE NUMBER TO 4!
+#ADD MOVEMENT AND SYSTEM AND THREAT
+#correlation test
+#sample size Statistical Heuristic test
+
+#These algorithms are often more flexible and even nonparametric (they can figure out how many parameters are #required to model your problem in addition to the values of those parameters). They are also high-variance, meaning #predictions vary based on the specific data used to train them. This added flexibility and power comes at the cost #of requiring more training data, often a lot more data.
+
+#randomForest documentation: https://cran.r-project.org/web/packages/randomForest/randomForest.pdf
+
+#code sourced from https://www.r-bloggers.com/2021/04/random-forest-in-r/ and https://www.youtube.com/watch?v=6EXPYzbfLCE
+
+```
+
+##Classification: Supervised Learning Model using the random foreset algorithm##
+In supervised learning, you have data that are labeled (i.e. taxonomy)
+-Binary classification (threatened vs. nonthreatened)
+  -could potentially explore multi-class classification (IUCN Ranking)
+
+#Random forest algorithm notes: classification and regression (therefore can take in categorical and numerical variables)
+-The more trees = the greater accuracy of prediction results (this is why RF is better than simply creating a decision tree)
+-Random forest builds multiple decision trees 
+-RF good classifier for datasets that are imbalanced 
+
+-Predictor variables find the response variables 
+  -For this model the predictor variables include: genetic diversity measures, population stability trend, geographic range, type of threats, other categorical variables that IUCN gives
+  
+
+
+#Setting up data
+```{r, animals: Browsing the data }
+#The response variable is threat level: nonthreatened vs threatened
+    ##We know the level of threat for each species so this is labeled data -> (supervised learning)
+#The predictor variables include: observed heterozygosity, genetic differentiation (fst), allelic richness, mean number of alleles, population stability (stable, decreasing, increases or unknown), movement pattern (migrant, not migrant, altitudinal migrant), generation length (in years)
+
+head(animals) #shows top few handful of rows with column names
+str(animals) #looks at the structure of the data (allows you to check whether columns are characters, numeric etc)
+
+#random forest can take in numeric or variables that are factors
+#need to convert "character" variables to factor 
+animals$class <- as.factor(animals$class)
+#animals$iucn <- as.factor(animals$iucn)
+#table(animals$iucn)
+animals$threat <- as.factor(animals$threat) #response variable needs to be a factor
+table(animals$threat)
+animals$marker <- as.factor(animals$marker)
+
+animals$pop.stability <- as.factor(animals$pop.stability)
+animals$movement.pattern <- as.factor(animals$movement.pattern)
+animals$system <- as.factor(animals$system)
+ 
+
+#need to impute values for NA's in the dataset with rfImpute
+#threat ~. -> threat level is predicted by all other columns in the dataset 
+#iter specifies how many random forests rfimpute() should build to estimate the missing values in the data set
+    #play around with the number of iterations to see if the estimation improves 
+#results are saved to new dataset called data.imputed
+data.imputed <- rfImpute(threat~., data = animals, iter=6) #everything needs to be a factor 
+#needed to remove phylogeny info because it cannot take in factor with more than 50 levels
+
+#rfImpute prints of out-of-bag OOB error rate for each iteration 
+#the percent OOB should get smaller with each iteration- if they don't then you can conclude that the estimates are going to be as good as they can get
+
+```
+##Out of Bag## --> checks the accuracy of the model 
+
+
+
+##Partitoining the data: Training and Test
+```{r, data partioning}
+#Need to split test and training set
+set.seed(42) #set seed so model outcome is repeatable
+ind <- sample(2, nrow(data.imputed), replace = TRUE, prob = c(0.7, 0.3)) #training/test %70/%30
+train <- data.imputed[ind==1,]
+test <- data.imputed[ind==2,]
+
+```
+
+##Building the random forest##
+OOB estimate error rate: 100-error rate = % of OOB samples that were correctly classified by the random forest 
+```{r, random forest}
+
+rf <- randomForest(threat~., data=train, ntree=400, proximity= TRUE, importance = TRUE)
+rf
+#use the data.imputed dataset 
+#proximity = TRUE returns the proximity matrix (this is used to cluster samples for multidimensional plot)
+#for this model error = 0
+
+######### OUTPUT SUMMARY NOTES ###########
+#type of random forest is classification (non-threatened vs threatened)
+  #if we wanted to predict a numeric variable it would by type: "regression" and would predict numbers 
+#number of trees in the random forest defaults to 500 (later we will check to see if 500 is enough for optimal classification)
+#No of variables tried at each split shows how many variables (columns in the data) were considered at each internal node --> classification trees has a default setting of the square root of the number of variables 
+    #reg trees has default of num of variables total in dataset divided by 3 
+#we dont know if 3 is the best value so this is something that will be played around with later 
+
+#confusion matrix generated
+```
+
+#Confusion Matrix 
+```{r}
+#confusion matrix for accuracy of training and test dataset 
+p1 <- predict(rf, train)
+confusionMatrix(p1, train$threat)
+p2 <- predict(rf, test)
+confusionMatrix(p2, test$threat) 
+
+```
+
+##Error Rate of Random Forest#
+```{r}
+#this is based on a matrix within "train" (randomForest model above) called err.rate
+oob.error.data <- data.frame(
+  Trees=rep(1:nrow(rf$err.rate), times=3),
+  Type=rep(c("OOB", "Threatened", "Non Threatened"), each=nrow(rf$err.rate)),
+  Error=c(rf$err.rate[,"OOB"],
+    rf$err.rate[,"Threatened"],
+    rf$err.rate[,"Non Threatened"]))
+
+#one column will be the OOB error rate, one column for error rate for each threat level (or how often each threat level is misclassified) 
+#each row reflects the error rates at different stages of creating the random forest: first row contains error rates after making the first tree, the last row [500,] contains the error rates after making 500 trees 
+
+#generate a data frame
+#one column with contain the number of trees, one column for type of error (OOB), and one column for error value
+
+#call to ggplot train model
+ggplot(data=oob.error.data, aes(x=Trees, y=Error))+
+  geom_line(aes(color=Type))+
+  theme_bw()t
+
+#for this model, error rate stabilizes after 100 trees- this is probably due to low data points
+```
+
+##Check for optimal number of variables at each internal node in the tree##
+```{r}
+oob.values <- vector(length=10) #create an empty vector that can hold 10 values
+
+#create a loop that tests different numbers of variables in each step 
+for (i in 1:10) {
+  temp.model <- randomForest(threat ~ ., data=data.imputed, mtry=i, ntree=100) #building a random forest using "i" to determine the number of variables to try at each step
+  oob.values[i] <- temp.model$err.rate[nrow(temp.model$err.rate),1] #this is where the OOB error rate is stored after each random forest is built that usese a different value for mtry (1-10)
+  #want to access the error rate in the last row of the first column of the dataframe of temp.model (the OOB error rate when all ntrees (100) have been made)
+} 
+
+oob.values #the third value is the default but the 5th value is lowest so should we change?
+
+```
+
+##Importance plot
+Mean decrease in accuracy
+  -The Mean Decrease Accuracy plot expresses how much accuracy the model losses by excluding each variable. 
+
+Mean decrease in Gini
+  -gini is another way of looking at the predictive power of your variables
+```{r, importance plot}
+varImpPlot(rf)
+#generates importance plot (for this model fst is the most important attribute when predicting threat)
+
+##Mean decrease in accuracy, population stability is not the strongest predictor but is high in aiding the model? 
+```
+
+#Partial Dependence plot
+```{r}
+partialPlot(rf, train, fst, "Non Threatened") #if fst is higher than 0.2 than there is a higher chance of classifying animals as threatened 
+
+partialPlot(rf, train, observed, "Threatened") #if observed heterozygosity is lower than 0.6 than theres a higher chance of classifying animals as threatened 
+
+partialPlot(rf, train, mean.alleles, "Threatened") #if mean number of alleles is lower than ~13 than theres a higher chance of classifying animals as threatened 
+```
+
+#Multidimensional Scaling Plot (same as PCoA)
+Shows distances among samples rather than correlations among samples (PCA)
+Q.does the distance between the two groups shows how different they are - how much the attributes contribute to their variation?
+```{r}
+
+
+##FROM R DOCUMENTATION: if proximity=TRUE when randomForest is called, a matrix of proximity measures among the input (based on the frequency that pairs of data points are in the same terminal nodes).
+
+distance.matrix <- as.dist(1-rf$proximity) #using as.dist function
+#creates a distance matrix 1-prox. matrix (generated from randomForest model rf)
+
+mds <- cmdscale(distance.matrix, eig = TRUE, x.ret = TRUE) #classical multidimensional scaling
+#eig = TRUE returns eigen values whihc is used to calculate how much variation in the distance matrix each axis accounts for
+mds.var.per <- round(mds$eig/sum(mds$eig)*100, 1) #% of variation in the distance matrix that X & Y axis' account for
+mds.var.per
+
+#format data for ggplot
+mds.values <- mds$points
+mds.data <- data.frame(Sample=rownames(mds.values),
+  X=mds.values[,1],
+  Y=mds.values[,2],
+  Status=train$threat)
+
+mds.data
+
+#Multidimensional scaling plot
+ggplot(data=mds.data, aes(x=X, y=Y, label=Sample))+
+  geom_text(aes(color=Status)) +
+  theme_bw()+
+  xlab(paste("MDS1 - ", mds.var.per[1], "%", sep="")) +
+  ylab(paste("MDS2 - ", mds.var.per[2], "%", sep="")) +
+  ggtitle("MDS plot using (1-Random Forest Proximites)")
+  
+
+#MDSplot(rf, train$threat) #quick code to generate simple MDS plot
+
+```
