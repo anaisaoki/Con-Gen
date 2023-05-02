@@ -1,0 +1,115 @@
+---
+title: "Phylogeny inferenece: SNP Data"
+output: html_document
+date: '2023-03-30'
+---
+
+```{r setup, include=FALSE}
+setwd("~/Desktop/ConGen")
+
+library(readxl)
+library(scales)
+library(ggplot2)
+library(see)
+library(tidyverse)
+library(nlme)
+library(ape)
+library(phytools)
+library(caper)
+library(geiger)
+library(dplyr)
+
+```
+
+#SNP DATA files upload#
+```{r}
+SNPanimals <- read_excel("mammals_SNP.xlsx", sheet = 1, na = c("", "NA")) #removes empty cells and NA's
+SNPanimals$sci.name = paste(SNPanimals$Genus, SNPanimals$Species, sep=" ") #sci name
+
+## Set up data: Mammals dataset ##
+SNPanimals$Phylum  = as.factor(as.character(SNPanimals$Phylum)) #as.factor converts to signify levels 
+SNPanimals$Class   = as.factor(as.character(SNPanimals$Class)) #as.character converts object with letters
+SNPanimals$Order   = as.factor(as.character(SNPanimals$Order))
+SNPanimals$Family  = as.factor(as.character(SNPanimals$Family))
+SNPanimals$Genus   = as.factor(as.character(SNPanimals$Genus))
+SNPanimals$Species = as.factor(as.character(SNPanimals$Species))
+SNPanimals$iucn[SNPanimals$iucn==""] = NA
+SNPanimals$iucn    = as.factor(as.character(SNPanimals$iucn))
+
+```
+
+#Set up phylogenetic tree
+```{r}
+#as phylo.formula2 builds tree from a set of nested taxonomic variables
+as.phylo.formula2 = function (x, data = parent.frame(), collapse = TRUE){ 
+  err <- "Formula must be of the kind \"~A1/A2/.../An\"."
+  if (length(x) != 2) 
+    stop(err)
+  if (x[[1]] != "~") 
+    stop(err)
+  f <- x[[2]]
+  taxo <- list()
+  while (length(f) == 3) {
+    if (f[[1]] != "/") 
+      stop(err)
+    if (!is.factor(data[[deparse(f[[3]])]])) 
+      stop(paste("Variable", deparse(f[[3]]), "must be a factor."))
+    taxo[[deparse(f[[2]])]] <- data[[deparse(f[[3]])]]
+    if (length(f) > 1) 
+      f <- f[[2]]
+  }
+  if (!is.factor(data[[deparse(f)]])) 
+    stop(paste("Variable", deparse(f), "must be a factor."))
+  taxo[[deparse(f)]] <- data[[deparse(f)]]
+  taxo.data <- as.data.frame(taxo)
+  leaves.names <- as.character(taxo.data[, 1])
+  taxo.data[, 1] <- 1:nrow(taxo.data)
+  f.rec <- function(subtaxo) {
+    u <- ncol(subtaxo)
+    levels <- unique(subtaxo[, u])
+    if (u == 1) {
+      if (length(levels) != nrow(subtaxo)) 
+        warning("Error, leaves names are not unique.")
+      return(as.character(subtaxo[, 1]))
+    }
+    t <- character(length(levels))
+    for (l in 1:length(levels)) {
+      x <- f.rec(subtaxo[subtaxo[, u] == levels[l], ][1:(u - 1)])
+      t[l] <- paste("(", paste(x, collapse = ","), ")", sep = "")
+    }
+    return(t)
+  }
+  string <- paste("(", paste(f.rec(taxo.data), collapse = ","),");", sep = "")
+  
+  #read.newick reads a newick style tree into file 
+  phy <- read.newick(text = string) ## so that singles will be read without error
+  phy$edge.length <- rep(1,nrow(phy$edge))
+  phy <- collapse.singles(phy)
+  phy$tip.label <- leaves.names[as.numeric(phy$tip.label)]
+  return(phy)
+}
+
+library(phytools)
+data(SNPanimals)
+t1<-as.phylo.formula(~Phylum/Class/Order/Family/Genus/Species, 
+    data=SNPanimals)
+plotTree(t1,fsize=0.7,ftype="i")
+```
+
+```{r}
+##observed heterozyogsity## 
+#phylo uses phylogeny inference using least squares 
+SNPanimalsdf = SNPanimals[!is.na(SNPanimals$iucn) & !is.na(SNPanimals$observed),]
+SNPanimalstreeT <- as.phylo.formula(~Phylum/Class/Order/Family, data = SNPanimals, collapse = TRUE) 
+SNPanimalsTree <- multi2di(SNPanimalstreeT)
+#we need to look at residuals of distribution of observed heterozygosity from taxonomy to see correlation from shared ancestry
+#are errors correlated? 
+outpgls = gls(observed~iucn-1, correlation = corAR1(form = ~1 | sci.name), data = SNPanimalsdf, method = "ML")
+#method ML -> log liklihood is maximized (data not normally dist)
+summary(outpgls) #correlation of linear model using least squares 
+#standardized residual errors
+
+#residual std error/root n to give stdev (where n is the number animals in dataset that is being analyzed (df+1))
+#squared of stdev to get variance
+
+```
