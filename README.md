@@ -6,3 +6,6 @@ Data files collated from DataDrayad for meta-analysis include:
 
 "Violin_plots.rmd" file: 
   contains code for violin plots to visualize the data distribution for each species class (Aves, Amphibia, Actionopterygii, Mammalia & Reptilia) for studies       collated from the    repository DataDryad used in the meta-analysis of this project.  
+
+"IUCN_ML_Combined.RDM" file:
+  containts code for the random forest algorithm using entire data set (Data Dryad + Macropopgen) as one model
