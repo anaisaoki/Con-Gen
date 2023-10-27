@@ -1,0 +1,106 @@
+---
+title: "fish_ML"
+output: html_document
+date: '2023-08-11'
+---
+
+```{r setup, include=FALSE}
+
+fish <- read_excel("~/Desktop/Internship/ML_excel_files/fish_ML.xlsx")
+
+head(fish) #shows top few handful of rows with column names
+str(fish) #looks at the structure of the data (allows you to check whether columns are characters, numeric etc)
+
+
+#random forest can take in numeric or variables that are factors
+#need to convert "character" variables to factor 
+fish$threat <- as.factor(fish$threat) #response variable needs to be a factor
+table(fish$threat)
+fish$population_stability_trends <- as.factor(fish$population_stability_trends)
+fish$movement_pattern <- as.factor(fish$movement_pattern)
+fish$system <- as.factor(fish$system)
+``` 
+
+```{r}
+#need to impute values for NA's in the dataset with rfImpute
+#threat ~. -> threat level is predicted by all other columns in the dataset 
+#iter specifies how many random forests rfimpute() should build to estimate the missing values in the data set
+    #play around with the number of iterations to see if the estimation improves 
+#results are saved to new dataset called data.imputed
+data.imputed <- rfImpute(threat~., data = fish, iter=3) #everything needs to be a factor 
+#needed to remove phylogeny info because it cannot take in factor with more than 50 levels
+```
+
+
+##Partitoining the data: Training and Test
+```{r, data partioning}
+#Need to split test and training set
+set.seed(10) #set seed so model outcome is repeatable
+ind <- sample(2, nrow(data.imputed), replace = TRUE, prob = c(0.7, 0.3)) #training/test %70/%30
+train <- data.imputed[ind==1,]
+test <- data.imputed[ind==2,]
+
+```
+
+##Building the random forest##
+OOB estimate error rate: 100-error rate = % of OOB samples that were correctly classified by the random forest 
+```{r, random forest}
+
+set.seed(10)
+rf_fish <- randomForest(threat~., data=train, ntree=300, proximity= TRUE, importance = TRUE)
+rf_fish
+#use the data.imputed dataset 
+#proximity = TRUE returns the proximity matrix (this is used to cluster samples for multidimensional plot)
+#for this model error = 0
+
+######### OUTPUT SUMMARY NOTES ###########
+#type of random forest is classification (non-threatened vs threatened)
+  #if we wanted to predict a numeric variable it would by type: "regression" and would predict numbers 
+#number of trees in the random forest defaults to 500 (later we will check to see if 500 is enough for optimal classification)
+#No of variables tried at each split shows how many variables (columns in the data) were considered at each internal node --> classification trees has a default setting of the square root of the number of variables 
+    #reg trees has default of num of variables total in dataset divided by 3 
+#we dont know if 3 is the best value so this is something that will be played around with later 
+
+#confusion matrix generated
+```
+
+```{r}
+#confusion matrix for accuracy of training and test dataset 
+p1 <- predict(rf_fish, train)
+confusionMatrix(p1, train$threat)
+p2 <- predict(rf_fish, test)
+confusionMatrix(p2, test$threat) 
+
+#Sensitivity is the percentage of true records that you predicted correctly. Specificity, on the other hand, is to measure what portion of the actual false records you predicted correctly.
+
+```
+
+```{r, importance plots}
+varImpPlot(rf_fish)
+print(varImp(rf_fish))
+
+imp.plot <- vip(rf_fish)
+imp.plot + xlab("Model features") + ylab("Mean Decrease Accuracy")+ 
+  ggtitle("Class Actinopterygii Model Feature Importance")+
+  theme_light()
+```
+
+##Error Rate of Random Forest#
+```{r}
+#this is based on a matrix within "train" (randomForest model above) called err.rate
+oob.error.data <- data.frame(
+  Trees=rep(1:nrow(rf_fish$err.rate), times=3),
+  Type=rep(c("OOB", "Threatened", "Non Threatened"), each=nrow(rf_fish$err.rate)),
+  Error=c(rf_fish$err.rate[,"OOB"],
+    rf_fish$err.rate[,"Threatened"],
+    rf_fish$err.rate[,"Non Threatened"]))
+
+
+#call to ggplot train model
+ggplot(data=oob.error.data, aes(x=Trees, y=Error))+
+  geom_line(aes(color=Type))+
+  xlab("Number of Trees (ntrees)")+
+  ylab("Error rate")+
+  ggtitle("Error rate of random forest model for class actinopterygii")+
+  theme_bw()
+```

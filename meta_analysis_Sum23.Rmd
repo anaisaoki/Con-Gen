@@ -1,0 +1,340 @@
+---
+title: "Meta-Analysis"
+output: html_document
+date: '2023-08-10'
+---
+
+This R File contains data collated from Data Dryad (Thesis meta-analysis data) as well as a large data file obtained from MacroPopGen database (only microsatellite)
+This data contains a total of 16 columns 
+1.class 2. threat (non-threatened vs threatened) 3. marker type 4. observed heterozygosity 5. expected heterozygosity 6. mean number of alleles 7. allelic richness 8. fst 9. population stability (given by the IUCN) 10. system (IUCN) 11. movement paper (IUCN) 12. # of threats listed (as counts, IUCN) 13 # of trade use (as counts, IUCN) 14. IUCN RedList status 15. common name 16. scientific name
+
+IUCN STATUS from low concern to high: 
+least concern, near threatened, vulnerable, endangered, critically endangered 
+IUCN classifies least concern and near threatened as non-threatened species and vulnerable, endangered and critically endangered as threatened species 
+
+This file contains code for:
+-check for normality and homogenity of variance within data
+-visualization of the data (violin plots)
+-one way ANOVA looking differences in each genetic diversity measure amongst IUCN status for each class
+-two-sample t test looking at threat level (given by the IUCN) with each genetic diversity measure for each class
+-generalized linear regression models looking at each genetic diversity, fst, and population stability as predictor for species threat level
+
+```{r setup, include=FALSE}
+
+#libraries
+library(dplyr)
+library(ggstance)
+library(Hmisc)
+library(wesanderson)
+library(readxl)
+library(ggpubr)
+library(car)
+
+#Upload data
+meta <- read_excel("~/Desktop/Internship/dryad_macropop_metaanalysis.xlsx")
+View(meta)
+```
+
+class and iucn redlist rank counts in dataset 
+```{r}
+#Look at data
+head(meta) #total of 16 columns: class, threat, marker, observed, expected, mean alleles, allelic richness, fst, population stability, system, movement pattern, # threats listed, # trade uses listed, IUNC RedList rank
+str(meta)
+```
+
+```{r}
+#obtain counts for each IUCN RedList Ranking across all classes
+sum(meta$iucn =="least concern") #5315
+sum(meta$iucn =="near threatened") #584
+sum(meta$iucn == "vulnerable") #1045
+sum(meta$iucn == "endangered") #449
+sum(meta$iucn == "critically endangered") #163
+
+#obtain counts for each class (this file has a total of 7,556 entries)
+class <- unique(meta$class) 
+total <- length(class)
+total #six different classes included in this study
+sum(meta$class == "Actinopterygii") #2291 total fish data points
+sum(meta$class == "Mammalia") #2087 total mammal data points
+sum(meta$class == "Aves") #805 total bird data points
+sum(meta$class == "Amphibia") #1054 total amphibian data points
+sum(meta$class == "Reptilia") #1301 total reptile data points
+
+```
+
+Subset data by class & looking at counts for each IUCN ranking 
+```{r}
+mammalia <- subset(meta,class=='Mammalia',select=c('observed','expected','mean.alleles', 'allelic.richness', 'fst', 'iucn', 'threat')) #count 2087 
+aves <- subset(meta,class=='Aves',select=c('observed','expected','mean.alleles', 'allelic.richness', 'fst', 'iucn', 'threat')) #count 805
+amphibia <- subset(meta,class=='Amphibia',select=c('observed','expected','mean.alleles', 'allelic.richness', 'fst', 'iucn', 'threat')) #count 1054
+reptilia <- subset(meta,class=='Reptilia',select=c('observed','expected','mean.alleles', 'allelic.richness', 'fst', 'iucn', 'threat')) #count 1301
+fish <- subset(meta,class=='Actinopterygii',select=c('observed','expected','mean.alleles', 'allelic.richness', 'fst', 'iucn', 'threat'))
+
+```
+
+```{r}
+#obtain counts for each IUCN RedList Ranking for each class
+#class mammalia 
+sum(mammalia$iucn =="least concern") #1472
+sum(mammalia$iucn =="near threatened") #271
+sum(mammalia$iucn == "vulnerable") #230
+sum(mammalia$iucn == "endangered") #97
+sum(mammalia$iucn == "critically endangered") #17
+
+#class aves 
+sum(aves$iucn =="least concern") #527
+sum(aves$iucn =="near threatened") #109
+sum(aves$iucn == "vulnerable") #79
+sum(aves$iucn == "endangered") #69
+sum(aves$iucn == "critically endangered") #21
+
+#class reptilia
+sum(reptilia$iucn =="least concern") #622
+sum(reptilia$iucn =="near threatened") #83
+sum(reptilia$iucn == "vulnerable") #380
+sum(reptilia$iucn == "endangered") #121
+sum(reptilia$iucn == "critically endangered") #95
+```
+#Threat level counts
+```{r}
+#Actinopterygii
+sum(amphibia$threat =="Non Threatened") #890
+sum(amphibia$threat =="Threatened") #164
+
+sum(aves$threat =="Non Threatened") #646
+sum(aves$threat =="Threatened") #159
+
+sum(fish$threat =="Non Threatened") #1921
+sum(fish$threat =="Threatened") #370
+
+sum(reptilia$threat =="Non Threatened") #702
+sum(reptilia$threat =="Threatened") #599
+
+sum(mammalia$threat =="Non Threatened") #1744
+sum(mammalia$threat =="Threatened") #343
+
+```
+
+
+visualization of data (all classes combined)
+```{r}
+
+meta$iucn <- factor(meta$iucn, #arranges axis by RedList rank
+                       c("least concern", "near threatened", "vulnerable", "endangered", "critically endangered"))
+
+#Looking at each genetic diversity measure across all classes 
+ob <- ggplot(data = meta, mapping = aes(x = iucn, y = observed))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Observed Heterozygosity") +
+  theme_bw()
+ob #distribution of observed heterozygosity across IUCN ranking for total data
+
+exp <- ggplot(data = meta, mapping = aes(x = iucn, y = expected))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Expected Heterozygosity") +
+  theme_bw()
+exp #distribution of expected heterozygosity across IUCN ranking for total data
+
+ma <- ggplot(data = meta, mapping = aes(x = iucn, y = mean.alleles ))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Mean Number of Alleles") +
+  theme_bw()
+ma #distribution of mean # alleles across IUCN ranking for total data
+
+ar <- ggplot(data = meta, mapping = aes(x = iucn, y = allelic.richness))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Allelic Richness") +
+  theme_bw()
+ar #distribution of allelic richness across IUCN ranking for total data
+
+fst <- ggplot(data = meta, mapping = aes(x = iucn, y = fst))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Genetic Differentiation (Fst)") +
+  theme_bw()
+fst #distribution of fst across IUCN ranking for total data
+
+ggarrange(ob, fst, ar, ma + rremove("x.text"), 
+          labels = c("A", "B", "C", "D"),
+          ncol = 2, nrow = 2)
+```
+
+
+visualization of data (seperating by class: code for Mammals ONLY)
+```{r}
+
+meta$iucn <- factor(meta$iucn, #arranges axis by RedList rank
+                       c("least concern", "near threatened", "vulnerable", "endangered", "critically endangered"))
+
+#MAMMALIA
+mob <- ggplot(data = mammalia, mapping = aes(x = iucn, y = observed))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Observed Heterozygosity") +
+  theme_bw()
+mob #distribution of observed heterozygosity across IUCN ranking for mammals
+
+mexp <- ggplot(data = mammalia, mapping = aes(x = iucn, y = expected))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Expected Heterozygosity") +
+  theme_bw()
+mexp #distribution of expected heterozygosity across IUCN ranking for mammals
+
+mma <- ggplot(data = mammalia, mapping = aes(x = iucn, y = mean.alleles ))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Mean Number of Alleles") +
+  theme_bw()
+mma #distribution of mean # alleles across IUCN ranking for mammals
+
+mar <- ggplot(data = mammalia, mapping = aes(x = iucn, y = allelic.richness))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Allelic Richness") +
+  theme_bw()
+mar #distribution of allelic richness across IUCN ranking for mamamals
+
+mfst <- ggplot(data = mammalia, mapping = aes(x = iucn, y = fst))+ 
+  geom_violin(aes(fill=iucn),show.legend = FALSE)+
+  geom_boxplot(width=0.1)+
+  xlab("IUCN RedList Ranking") + ylab("Genetic Differentiation (Fst)") +
+  theme_bw()
+mfst #distribution of fst across IUCN ranking for mammals
+
+ggarrange(mob, mfst, mar, mma + rremove("x.text"), 
+          labels = c("A", "B", "C", "D"),
+          ncol = 2, nrow = 2)
+```
+
+Checking for Normality using Shapiro-wilks test
+p value < 0.05 indicates that the data is not normal
+```{r}
+#Observed Heterozygosity
+#All failed normality
+shapiro.test(mammals$observed)
+shapiro.test(aves$observed)
+shapiro.test(reptilia$observed)
+shapiro.test(amphibia$observed)
+shapiro.test(fish$observed)
+
+#Expected Heterozygosity
+#All failed normality
+shapiro.test(mammals$expected) 
+shapiro.test(aves$expected)
+shapiro.test(reptilia$expected)
+shapiro.test(amphibia$expected)
+shapiro.test(fish$expected)
+
+#Mean Alleles
+shapiro.test(mammals$mean.alleles) #p=0.099
+shapiro.test(aves$mean.alleles)
+shapiro.test(reptilia$mean.alleles)
+shapiro.test(amphibia$mean.alleles)
+shapiro.test(fish$mean.alleles)
+
+#Allelic Richness
+#all failed
+shapiro.test(mammals$allelic.richness) 
+shapiro.test(aves$allelic.richness)
+shapiro.test(reptilia$allelic.richness)
+shapiro.test(amphibia$allelic.richness)
+shapiro.test(fish$allelic.richness)
+
+#FST
+#all failed 
+shapiro.test(mammals$fst) 
+shapiro.test(aves$fst)
+shapiro.test(reptilia$fst)
+shapiro.test(amphibia$fst)
+shapiro.test(fish$fst)
+```
+
+#One-Way ANOVA analysis looking at each genetic diversity measures across IUCN rankings
+```{r}
+#observed heterozygosity
+one.way.observed <- aov(observed ~ iucn, data = meta)
+summary(one.way.observed) #p-value 2e-16
+TukeyHSD(one.way.observed, conf.level = 0.95)
+
+#expected heterozygosity
+one.way.expected <- aov(expected ~ iucn, data = meta)
+summary(one.way.expected) #p-value 2e-16
+TukeyHSD(one.way.expected, conf.level = 0.95)
+
+#mean number of alleles
+one.way.ma<- aov(mean.alleles ~ iucn, data = meta)
+summary(one.way.ma) #p-value 2e-16
+TukeyHSD(one.way.ma, conf.level = 0.95)
+
+#allelic richness
+one.way.ar <- aov(allelic.richness ~ iucn, data = meta)
+summary(one.way.ar) #p-value 2e-16
+TukeyHSD(one.way.ar, conf.level = 0.95)
+
+#fst
+one.way.fst <- aov(fst ~ iucn, data = meta)
+summary(one.way.fst) #p-value 2e-16
+TukeyHSD(one.way.fst, conf.level = 0.95)
+```
+
+#Kruskal-Wallis analysis looking at each genetic diversity measure across all classes
+(data did not pass normality, need to do nonparametric test)
+```{r}
+kruskal.test(observed ~ iucn, data = meta)
+kruskal.test(expected ~ iucn, data = meta)
+kruskal.test(mean.alleles ~ iucn, data = meta)
+kruskal.test(allelic.richness ~ iucn, data = meta)
+kruskal.test(fst ~ iucn, data = meta)
+
+```
+
+#Kruskal-Wallis analysis looking at each genetic diversity measure for each class 
+(data did not pass normality, need to do nonparametric test)
+Mammals
+```{r}
+
+#observed heterozygosity
+one.way.observed <- aov(observed ~ iucn, data = mammals)
+summary(one.way.observed) #p-value 0.272 NOT SIG
+TukeyHSD(one.way.observed, conf.level = 0.95)
+
+#expected heterozygosity
+one.way.expected <- aov(expected ~ iucn, data = mammals)
+summary(one.way.expected) #p-value 0.153
+TukeyHSD(one.way.expected, conf.level = 0.95)
+
+#mean number of alleles
+one.way.ma<- aov(mean.alleles ~ iucn, data = mammals)
+summary(one.way.ma) #p-value 2e-16
+TukeyHSD(one.way.ma, conf.level = 0.95)
+
+#allelic richness
+one.way.ar <- aov(allelic.richness ~ iucn, data = mammals)
+summary(one.way.ar) #p-value 2e-16
+TukeyHSD(one.way.ar, conf.level = 0.95)
+
+#fst
+one.way.fst <- aov(fst ~ iucn, data = mammals)
+summary(one.way.fst) #p-value 2e-16
+TukeyHSD(one.way.fst, conf.level = 0.95)
+
+
+```
+
+#### CODE FOR TESTING MODEL WITH NEW INPUT DATA ######
+```{r}
+
+pred_test <- predict(model, newdata = data_test, type= "class") 
+#Call predict function on mode with new data that has been read in 
+pred_test #run to generate prediction 
+
+confusionMatrix(table(pred_test,data_test$target)) #The prediction to compute the confusion matrix and see the accuracy score 
+
+```
+
+

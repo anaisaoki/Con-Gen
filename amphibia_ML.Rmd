@@ -1,0 +1,96 @@
+---
+title: "amphibia_ML"
+output: html_document
+date: '2023-08-11'
+---
+
+```{r setup, include=FALSE}
+
+library(readxl)
+amphibia <- read_excel("~/Desktop/Internship/ML_excel_files/amphibia_ML.xlsx")
+```
+
+```{r}
+
+head(amphibia) #shows top few handful of rows with column names
+amphibia$threat <- as.factor(amphibia$threat) #response variable needs to be a factor
+table(amphibia$threat)
+amphibia$population_stability_trends <- as.factor(amphibia$population_stability_trends)
+amphibia$movement_pattern <- as.factor(amphibia$movement_pattern)
+amphibia$system <- as.factor(amphibia$system)
+
+data.imputed <- rfImpute(threat~., data = amphibia, iter=3) #everything needs to be a factor 
+
+```
+##Partitoining the data: Training and Test
+```{r, data partioning}
+#Need to split test and training set
+set.seed(10) #set seed so model outcome is repeatable
+ind <- sample(2, nrow(data.imputed), replace = TRUE, prob = c(0.7, 0.3)) #training/test %70/%30
+train <- data.imputed[ind==1,]
+test <- data.imputed[ind==2,]
+
+```
+
+##Building the random forest##
+OOB estimate error rate: 100-error rate = % of OOB samples that were correctly classified by the random forest 
+```{r, random forest}
+
+set.seed(12)
+rf_amphibia <- randomForest(threat~., data=train, ntree=300, proximity= TRUE, importance = TRUE)
+rf_amphibia
+
+```
+
+#Confusion Matrix 
+```{r}
+#confusion matrix for accuracy of training and test dataset 
+p1 <- predict(rf_amphibia, train)
+confusionMatrix(p1, train$threat)
+p2 <- predict(rf_amphibia, test)
+confusionMatrix(p2, test$threat) 
+
+#Sensitivity is the percentage of true records that you predicted correctly. Specificity, on the other hand, is to measure what portion of the actual false records you predicted correctly.
+
+```
+Error rate of the model
+```{r}
+oob.error.data <- data.frame(
+  Trees=rep(1:nrow(rf_amphibia$err.rate), times=3),
+  Type=rep(c("OOB", "Threatened", "Non Threatened"), each=nrow(rf_amphibia$err.rate)),
+  Error=c(rf_amphibia$err.rate[,"OOB"],
+    rf_amphibia$err.rate[,"Threatened"],
+    rf_amphibia$err.rate[,"Non Threatened"]))
+
+#call to ggplot train model
+ggplot(data=oob.error.data, aes(x=Trees, y=Error))+
+  geom_line(aes(color=Type))+
+  xlab("Number of Trees (ntrees)")+
+  ylab("Error rate")+
+  ggtitle("Error rate of random forest model for class amphibia")+
+  theme_bw()
+```
+
+Attritbute Importance
+```{r, importance plot}
+varImpPlot(rf_amphibia)
+#generates importance plot (for this model fst is the most important attribute when predicting threat)
+
+##Mean decrease in accuracy, population stability is the strongest predictor 
+
+#variable measures
+vi_rf_amphibia <- rf_amphibia$variable.importance #mean decrease in accuracy
+
+imp.plot <- vip(rf_amphibia)
+imp.plot + xlab("Model features") + ylab("Mean Decrease Accuracy")+ 
+  ggtitle("Class Amphibia Model Feature Importance")+
+  theme_light()
+
+vip(rf_amphibia, num_features = 7, geom = "point", horizontal = FALSE,
+aesthetics = list(color = "red", shape = 17, size = 7)) +
+xlab("Model features")+ ggtitle("Mean Decrease Accuracy")+
+theme_light()
+
+print(varImp(rf_amphibia))
+
+```
